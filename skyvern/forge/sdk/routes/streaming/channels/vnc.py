@@ -166,7 +166,14 @@ class VncChannel:
     workflow_run: WorkflowRun | None = None
 
     def __post_init__(self, initial_interactor: Interactor) -> None:
-        self.interactor = initial_interactor
+        # Read interactor from browser_session if available, otherwise use initial_interactor
+        if self.browser_session and self.browser_session.interactor:
+            self._interactor = self.browser_session.interactor  # type: ignore
+            LOG.info(f"{self.class_name} Restored interactor from session: {self._interactor}",
+                     browser_session_id=self.browser_session.persistent_browser_session_id,
+                     organization_id=self.organization_id)
+        else:
+            self._interactor = initial_interactor
         add_vnc_channel(self)
 
     @property
@@ -195,6 +202,27 @@ class VncChannel:
         self._interactor = value
 
         LOG.info(f"{self.class_name} Setting interactor to {value}", **self.identity)
+
+    async def set_interactor_async(self, value: Interactor) -> None:
+        """Set the interactor and persist to database."""
+        from skyvern.forge import app
+
+        self._interactor = value
+        LOG.info(f"{self.class_name} Setting interactor to {value}", **self.identity)
+
+        # Persist to database if we have a browser session
+        if self.browser_session:
+            try:
+                await app.DATABASE.update_persistent_browser_session(
+                    browser_session_id=self.browser_session.persistent_browser_session_id,
+                    organization_id=self.organization_id,
+                    interactor=value,
+                )
+                LOG.info(f"{self.class_name} Persisted interactor to database: {value}",
+                         browser_session_id=self.browser_session.persistent_browser_session_id)
+            except Exception as e:
+                LOG.error(f"{self.class_name} Failed to persist interactor to database",
+                          error=str(e), **self.identity)
 
     @property
     def is_open(self) -> bool:
@@ -338,6 +366,9 @@ async def loop_stream_vnc(vnc_channel: VncChannel) -> None:
     routed_vnc_url = _build_vnc_url_from_browser_address(browser_session.browser_address)
     if routed_vnc_url:
         vnc_url = routed_vnc_url
+    elif browser_session.vnc_port:
+        # Local VNC mode: use the session's vnc_port directly
+        vnc_url = f"ws://localhost:{browser_session.vnc_port}"
     elif browser_session.ip_address:
         # V1 ECS sessions: Direct IP connection (ip_address is a public/reachable IP)
         if ":" in browser_session.ip_address:
