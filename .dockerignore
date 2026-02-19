@@ -16,8 +16,8 @@ postgres-data
 **/secrets*.toml
 
 # Skyvern
-docs
-images
+/docs
+/images
 
 # Front
 skyvern-frontend/.env*
